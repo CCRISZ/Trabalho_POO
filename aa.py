@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List
-
+import pygame
 # =========================
 # CLASSE BASE: ARMA
 # =========================
@@ -11,7 +11,7 @@ class Arma(ABC):
 
     @abstractmethod
     def attack(self) -> None:
-        """Define como a arma ataca — deve ser implementado pelas subclasses."""
+        #Define como a arma ataca — deve ser implementado pelas subclasses.
         pass
 
     def __str__(self) -> str:
@@ -44,7 +44,7 @@ class Item(ABC):
 
     @abstractmethod
     def aplicar_bonus(self, personagem) -> None:
-        """Aplica o bônus deste item ao personagem."""
+        #Aplica o bônus deste item ao personagem.
         pass
 
     def __str__(self) -> str:
@@ -65,6 +65,7 @@ class Personagem(ABC):
     def __init__(self, nome: str):
         self.nome = nome
         self.vida_maxima = 100
+        self.vida_atual = self.vida_maxima
         self.defesa = 0
         self.move_speed = 1.0  # 100%
         self.armas: List[Arma] = []
@@ -76,6 +77,22 @@ class Personagem(ABC):
     def add_item(self, i: Item) -> None:
         self.itens.append(i)
         i.aplicar_bonus(self)
+    
+    def desenhar_barra_vida(self, tela, x, y):
+        barra_x = x
+        barra_y = y - 10
+        largura_total = 40
+        altura = 5
+
+        proporcao = self.vida_atual / self.vida_maxima
+        largura_atual = int(largura_total * proporcao)
+
+        # Fundo (vermelho)
+        pygame.draw.rect(tela, (150, 0, 0), (barra_x, barra_y, largura_total, altura))
+        # Vida atual (verde)
+        pygame.draw.rect(tela, (0, 255, 0), (barra_x, barra_y, largura_atual, altura))
+        # Contorno
+        pygame.draw.rect(tela, (255, 255, 255), (barra_x - 1, barra_y - 1, largura_total + 2, altura + 2), 1)
         
     @abstractmethod
     def bonus_passivo(self) -> None:
@@ -112,16 +129,47 @@ class Inimigo(ABC):
     vida_maxima: float
     defesa: float
     move_speed: float
-    poderes: List[Poder]
+    
 
     def __init__(self, nome: str):
         self.nome = nome
         self.vida_maxima = 150
+        self.vida_atual = self.vida_maxima
         self.defesa = 10
-        self.move_speed = 1.0  # 100%
+        self.move_speed = 0.5
+        self.x = 100
+        self.y = 100
+        self.tamanho = 40
+        self.dano = 5
+        self.cooldown_dano = 1000  # 1 segundo entre danos
+        self.ultimo_dano = 0
     
-    def add_poder (self, p: Poder):
-        self.poderes.append(p)
+    def mover_para(self, alvo_x, alvo_y):
+        #Movimenta o inimigo lentamente em direção ao jogador
+        if self.x < alvo_x:
+            self.x += self.move_speed
+        elif self.x > alvo_x:
+            self.x -= self.move_speed
+
+        if self.y < alvo_y:
+            self.y += self.move_speed
+        elif self.y > alvo_y:
+            self.y -= self.move_speed
+
+
+    def get_rect(self):
+        #Retorna o retângulo do inimigo (para colisão e desenho)
+        return pygame.Rect(self.x, self.y, 50, 50)
+    
+    def atacar(self, personagem: Personagem, tempo_atual):
+    # Causa dano se estiver colidindo e cooldown já passou
+        if self.get_rect().colliderect(personagem.rect):
+            if tempo_atual - self.ultimo_dano >= self.cooldown_dano:
+                personagem.vida_atual = max(0, personagem.vida_atual - self.dano)
+                self.ultimo_dano = tempo_atual
+                print(f"{self.nome} causou {self.dano} de dano! Vida atual do personagem: {personagem.vida_atual}")
+
+
 
     def __str__(self) -> str:
         txt = f"Inimigo: {self.nome}\n"
@@ -138,7 +186,9 @@ class Inimigo(ABC):
 class Inimigo_um(Inimigo):
     def __init__(self):
         super().__init__("Inimigo_um")
-        self.add_poder()
+        self.cor = (255, 0, 0)  # vermelho
+
+        
         
  
 
@@ -150,13 +200,15 @@ class Inimigo_um(Inimigo):
 class Antonio(Personagem):
     def __init__(self):
         super().__init__("Antonio")
-        self.add_arma(Whip()) #Todo personagem começa com 1 arma basica 
+        self.add_arma(Whip())  # arma inicial
         self.bonus_passivo()
 
     def bonus_passivo(self) -> None:
-        """Antonio começa com +20 HP e +1 de Defesa."""
+        #Antonio começa com +20 HP e +1 de Defesa.
         self.vida_maxima += 20
+        self.vida_atual = self.vida_maxima  # vida cheia ao aplicar o bônus
         self.defesa += 1
+
 
 
 # =========================
@@ -165,9 +217,44 @@ class Antonio(Personagem):
 class Whip(Arma):
     def __init__(self):
         super().__init__("Whip", 10)
+        self.cooldown = 1000      # tempo entre ataques (ms)
+        self.duracao = 200        # tempo que o ataque fica ativo (ms)
+        self.ultimo_ataque = 0
+        self.ativo = False
+        self.cor = (255, 255, 255)
+        self.largura = 60
+        self.altura = 15
+        self.rect = None
+        self.lado_direita = True  # alterna o lado do ataque
 
-    def attack(self) -> None:
-        print("Você chicoteia os inimigos à sua frente!")
+    def attack(self, tempo_atual, x, y,direcao, inimigos : Inimigo):
+        #Ativa o chicote se o cooldown acabou.
+        if not self.ativo and tempo_atual - self.ultimo_ataque >= self.cooldown:
+            self.ativo = True
+            self.tempo_inicio = tempo_atual
+            self.ultimo_ataque = tempo_atual
+
+            if direcao == "right":
+                self.rect = pygame.Rect(x + 40, y + 10, self.largura, self.altura)
+            elif direcao == "left":
+                self.rect = pygame.Rect(x - self.largura, y + 10, self.largura, self.altura)
+
+        for inimigo in inimigos:
+            if self.rect.colliderect(inimigo.get_rect()):
+                dano_final = max(0, self.dano - inimigo.defesa * 0.2)
+                inimigo.vida_atual = max(0, inimigo.vida_atual - dano_final)
+                print(f"{inimigo.nome} levou {dano_final:.1f} de dano! Vida restante: {inimigo.vida_atual:.1f}")
+
+    def update(self, tempo_atual):
+        #Desativa o chicote após o tempo de duração acabar.
+        if self.ativo and tempo_atual - self.tempo_inicio >= self.duracao:
+            self.ativo = False
+
+    def draw(self, tela):
+        #Desenha o retângulo se estiver ativo.
+        if self.ativo and self.rect:
+            pygame.draw.rect(tela, self.cor, self.rect)
+
 
 
 class MagicWand(Arma):
@@ -244,7 +331,7 @@ if __name__ == '__main__':
     antonio.add_item(defesa)
     antonio.add_item(vida)
     
-    
+## TESTEEE OIOIOIOI NAOSEIMEXERNISSO    
     
     
     print(antonio)
